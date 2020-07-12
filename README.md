@@ -5,7 +5,7 @@ We need to think of how to structure the README and explain the architecture of 
 ## Authors
 
 * **Peter Baltov**
-* **Fjolla Dedaj*
+* **Fjolla Dedaj**
 * **Ivan Kabadzhov**
 * **Lorenzo Rota**
 
