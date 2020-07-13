@@ -2,6 +2,10 @@
 
 We need to think of how to structure the README and explain the architecture of our project.
 
+## Architecture idea
+
+![Luno Trading Bot Architecture](http://url-needed)
+
 ## Authors
 
 * **Peter Baltov**
