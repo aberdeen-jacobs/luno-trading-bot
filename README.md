@@ -4,7 +4,7 @@ We need to think of how to structure the README and explain the architecture of 
 
 ## Architecture idea
 
-![Luno Trading Bot Architecture](http://url-needed)
+![Luno Trading Bot Architecture](https://github.com/aberdeen-jacobs/luno-trading-bot/blob/media/luno-bot-architecture.png?raw=true)
 
 ## Authors
 
