@@ -6,9 +6,9 @@ import argparse
 
 from plugin_handler import PluginHandler
 
-"""Event Loop"""
+"""Simple Event Loop"""
 
-def init_argparse(logger):
+def init_argparse(logger) -> None:
     """Fetch the command line arguments and operate on them"""
 
     parser = argparse.ArgumentParser(description='Event Loop')
@@ -24,6 +24,17 @@ def init_argparse(logger):
         logging.config.dictConfig(log_cfg)
         logger = logging.getLogger(__name__)
         logger.debug('DEBUG MODE ENABLED')
+
+def plugin_life_info(logger, plugin_handler) -> None:
+    """Displays the current responsiveness status of each loaded plugin"""
+    
+    whois_alive = plugin_handler.whois_alive()
+    logger.info('Responsiveness of each plugin:')
+    for plugin,state in whois_alive.items():
+        if state is True:
+            logger.info('->\t{} is Running'.format(plugin.name))
+        else:
+            logger.info('->\t{} is not Running'.format(plugin.name))
 
 def main():
     """Main function that runs the application"""
@@ -42,6 +53,7 @@ def main():
     while True:
         logger.debug('Loaded plugins: {}'.format(plugin_handler.plugins))
         plugin_handler.invoke_callback('loop', 'A simple string to manipulate')
+        plugin_life_info(logger, plugin_handler)
         time.sleep(3)
         plugin_handler.update()
 

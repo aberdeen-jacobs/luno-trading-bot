@@ -1,8 +1,10 @@
-from plugin import Plugin
+import asyncio
 import inspect
 import os
 import pkgutil
 import logging
+
+from plugin import Plugin
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,7 @@ class PluginHandler(object):
         self.seen_paths = []
         self.update()
 
-    def update(self):
+    def update(self) -> None:
         """Detect plugins that are stored in the dedicated plugin folder"""
 
         self.tmp_found_plugins = []
@@ -40,8 +42,16 @@ class PluginHandler(object):
         del(self.tmp_found_plugins)
         self.seen_paths = []
 
-    def invoke_callback(self, function, *args, plugin_list=[]):
-        """Invoke a specified callback function with supplied arguments in specified plugins"""
+    def invoke_callback(self, *instr, plugin_list=[]) -> dict:
+        """Invoke a specified callback function with supplied arguments in specified plugins
+
+        :return: A dictionary consisting of pairs of plugins and their returned objects
+        :rtype: dict
+        """
+
+        function = instr[0]
+        args = instr[1:]
+        arg_dict = {}
 
         if plugin_list == []:
             plugin_list = self.plugins
@@ -49,10 +59,23 @@ class PluginHandler(object):
         for plugin in plugin_list:
             callback = getattr(plugin, function)
             value = callback(*args)
-            logger.debug('executing: {}.{}({})'.format(plugin.name, function, *args))
+            logger.debug('Executing function: {}.{}, with arguments: {}'.format(plugin.name, function, args))
             logger.debug('return value: {}'.format(value))
+            arg_dict[plugin] = value
 
-    def traverse_plugins(self, package):
+        return arg_dict
+
+    def whois_alive(self) -> dict:
+        """Invoke the ping callback on each loaded plugin
+
+        :return: A dictionary of plugins paired with their responsiveness state
+        :rtype: dict
+        """
+        running_plugins = self.invoke_callback('ping')
+        is_alive_dict = { plugin:(True if plugin in running_plugins else False) for plugin in self.plugins }
+        return is_alive_dict
+
+    def traverse_plugins(self, package) -> None:
         """Traverse the plugin folder to retrieve all plugins"""
 
         imported_package = __import__(package, fromlist=[''])
