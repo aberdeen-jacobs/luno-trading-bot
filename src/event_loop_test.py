@@ -1,3 +1,4 @@
+import asyncio
 import time
 import logging
 import logging.config
@@ -25,13 +26,13 @@ def init_argparse(logger) -> None:
         logger = logging.getLogger(__name__)
         logger.debug('DEBUG MODE ENABLED')
 
-def plugin_life_info(logger, plugin_handler) -> None:
+def plugin_heartbeat(logger, plugin_handler) -> None:
     """Displays the current responsiveness status of each loaded plugin"""
-    
+
     whois_alive = plugin_handler.whois_alive()
     logger.info('Responsiveness of each plugin:')
     for plugin,state in whois_alive.items():
-        if state is True:
+        if state:
             logger.info('->\t{} is Running'.format(plugin.name))
         else:
             logger.info('->\t{} is not Running'.format(plugin.name))
@@ -50,12 +51,25 @@ def main():
 
     logger.info('Initializing event loop')
     plugin_handler = PluginHandler('plugins')
+
+    loop = asyncio.get_event_loop()
+
+    try:
+        asyncio.ensure_future(plugin_handler.execution_loop())
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        loop.close()
+
+    """
     while True:
         logger.debug('Loaded plugins: {}'.format(plugin_handler.plugins))
         plugin_handler.invoke_callback('loop', 'A simple string to manipulate')
-        plugin_life_info(logger, plugin_handler)
+        plugin_heartbeat(logger, plugin_handler)
         time.sleep(3)
         plugin_handler.update()
+    """
 
 if __name__ == '__main__':
     main()

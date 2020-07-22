@@ -12,9 +12,10 @@ class Plugin(object):
         self.name = None
         self.description = None
 
-    # methods to be implemented by inherited classes
-    def ping(self) -> str:
-        raise NotImplementedError
+    # Predefined methods
+    async def heartbeat(self) -> str:
+        return 'Alive!'    
 
-    def loop(self, argument) -> None:
+    # Abstract methods
+    async def main(self, argument) -> tuple:
         raise NotImplementedError
