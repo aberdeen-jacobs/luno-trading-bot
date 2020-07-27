@@ -1,24 +1,27 @@
+import signal
 import asyncio
 import time
 import logging
 import logging.config
 import yaml
 import argparse
+from event_loop import EventLoop
 
-from plugin_handler import PluginHandler
+"""Driver module"""
 
-"""Simple Event Loop"""
+logger = logging.getLogger(__name__)
 
-def init_argparse(logger) -> None:
+def init_argparse() -> None:
     """Fetch the command line arguments and operate on them"""
 
+    global logger
     parser = argparse.ArgumentParser(description='Event Loop')
     parser.add_argument('-d', '--debug', action='store_true',
                         help='set the logging level to logging.DEBUG')
     args = parser.parse_args()
     if args.debug:
-        # override the logger configuration and set it to DEBUG in memory
-        # this necessary to ensure that child loggers inherit the same setting
+        # Override the logger configuration and set it to DEBUG in memory
+        # This necessary to ensure that child loggers inherit the same setting
         with open('log_config.yml', 'r') as f:
             log_cfg = yaml.safe_load(f.read())
             log_cfg['root']['level'] = 'DEBUG'
@@ -37,39 +40,50 @@ def plugin_heartbeat(logger, plugin_handler) -> None:
         else:
             logger.info('->\t{} is not Running'.format(plugin.name))
 
+async def exit():
+    """Stopping the asyncio event loop"""
+
+    loop = asyncio.get_event_loop()
+    logger.debug('Safely stopping the asyncio event loop')
+    loop.stop()
+
+def clean_exit():
+    """Cleaning up the asyncio tasks"""
+
+    for task in asyncio.all_tasks():
+        logger.debug('Cancelling the {} task in asyncio'.format(task))
+        task.cancel()
+    asyncio.ensure_future(exit())
+
 def main():
     """Main function that runs the application"""
 
-    # initialize logger
+    # Initialize logger
     with open('log_config.yml', 'r') as f:
+        global logger
         log_cfg = yaml.safe_load(f.read())
         logging.config.dictConfig(log_cfg)
         logger = logging.getLogger(__name__)
 
-    # parse arguments
-    init_argparse(logger)
+    # Parse arguments
+    init_argparse()
 
-    logger.info('Initializing event loop')
-    plugin_handler = PluginHandler('plugins')
-
+    logger.info('Initializing the event loop')
+    event_loop = EventLoop()
     loop = asyncio.get_event_loop()
 
+    # Run the asyncio event loop
+    signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+    for sig in signals:          
+        loop.add_signal_handler(sig, clean_exit)
     try:
-        asyncio.ensure_future(plugin_handler.execution_loop())
+        asyncio.ensure_future(event_loop.data_provider_loop())
+        asyncio.ensure_future(event_loop.plugins_runner())
         loop.run_forever()
-    except KeyboardInterrupt:
-        pass
     finally:
+        logging.info('Shutting down event loop')
         loop.close()
 
-    """
-    while True:
-        logger.debug('Loaded plugins: {}'.format(plugin_handler.plugins))
-        plugin_handler.invoke_callback('loop', 'A simple string to manipulate')
-        plugin_heartbeat(logger, plugin_handler)
-        time.sleep(3)
-        plugin_handler.update()
-    """
 
 if __name__ == '__main__':
     main()
