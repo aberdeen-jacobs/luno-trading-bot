@@ -4,6 +4,7 @@ import pkgutil
 import asyncio
 import logging
 from plugin import Plugin
+from data_provider import DataProvider
 
 logger = logging.getLogger(__name__)
 loop = asyncio.get_event_loop()
@@ -11,14 +12,16 @@ loop = asyncio.get_event_loop()
 class PluginHandler(object):
     """Container for all plugins stored in a dedicated plugin folder"""
 
-    def __init__(self, plugin_folder):
+    def __init__(self, plugin_folder: str, data_sink: DataProvider):
         """Locates the plugin folder and loads them"""
 
         logger.info('Initialized PluginHandler')
         self.plugin_folder = plugin_folder
+        self.data_sink = data_sink
         self.seen_paths = []
         self.plugins = []
         self.enabled_plugins = []
+        self.completed_task = {}
         self.update()
 
     def update(self) -> None:
@@ -27,7 +30,7 @@ class PluginHandler(object):
         self.tmp_found_plugins = []
         self.traverse_plugins(self.plugin_folder)
 
-        # unload plugins that are no longer in the plugin directory
+        # Unload plugins that are no longer in the plugin directory
         tmp_loaded_plugins = [plugin.name for plugin in self.plugins]
         obsolete_plugin_names = list(set(tmp_loaded_plugins) - set(self.tmp_found_plugins))
         obsolete_plugins = []
@@ -39,14 +42,16 @@ class PluginHandler(object):
         for plugin in obsolete_plugins:
             logger.info('Unloaded plugin class: {}.{}'.format(plugin.name, plugin.__class__.__name__))
             self.plugins.remove(plugin)
+            # Remove plugin from enabled plugins list and unsubscribe from observable
             if plugin in self.enabled_plugins:
                 self.enabled_plugins.remove(plugin)
+                self.data_sink.delete_observer(plugin)
             del(plugin)
 
         del(self.tmp_found_plugins)
         self.seen_paths = []
 
-    async def invoke_callback(self, *instr, plugin_list=[None]) -> dict:
+    async def invoke_callback(self, *instr, plugin_list=[None]):
         """Invoke a specified callback function with supplied arguments in specified plugins
 
         :return: A dictionary consisting of pairs of plugins and their returned objects
@@ -55,18 +60,17 @@ class PluginHandler(object):
 
         function = instr[0]
         args = instr[1:]
-        tasks = []
-        
+
         if plugin_list == [None]:
             plugin_list = self.enabled_plugins
 
         for plugin in plugin_list:
-            callback = getattr(plugin, function)
-            tasks.append(asyncio.ensure_future(callback(*args)))
-            logger.debug('Executing function: {}.{}, with arguments: {}'.format(plugin.name, function, args))
-        completed_tasks = await asyncio.gather(*tasks)
-        results = [task for task in completed_tasks]
-        return dict(zip(plugin_list, results))
+            # Check if previously run task is done before creating new task
+            if self.completed_task[plugin].done():
+                callback = getattr(plugin, function)
+                task = asyncio.ensure_future(callback(*args))
+                self.completed_task[plugin] = task
+                logger.debug('Executing function: {}.{}, with arguments: {}'.format(plugin.name, function, args))
 
     async def whois_alive(self) -> dict:
         """Invoke the heartbeat callback on each loaded plugin
@@ -74,8 +78,9 @@ class PluginHandler(object):
         :return: A dictionary of plugins paired with their responsiveness state
         :rtype: dict
         """
-        running_plugins = await self.invoke_callback('heartbeat')
-        is_alive_dict = { plugin:(True if plugin in running_plugins else False) for plugin in self.plugins }
+
+        completed_tasks = await self.invoke_callback('heartbeat')
+        is_alive_dict = { plugin:(True if plugin in completed_tasks else False) for plugin in self.plugins }
         return is_alive_dict
 
     def traverse_plugins(self, package) -> None:
@@ -90,18 +95,26 @@ class PluginHandler(object):
 
                 # Load plugin into the plugins list
                 for (_, c) in clsmembers:
+                    if issubclass(c, Plugin):
+                        plugin_obj = c(self.data_sink)
+                    else:
+                        plugin_obj = c()
+
                     # Create boolean list comparing the uniqueness of each plugin against the new plugin
                     is_not_duplicate = [c.__module__ != plugin.name for plugin in self.plugins]
 
                     # Only add classes that are a non duplicate sub class of Plugin, but NOT Plugin itself
                     if issubclass(c, Plugin) & (c is not Plugin) & all(is_not_duplicate):
                         logger.info('Loaded plugin class: {}.{}'.format(c.__module__, c.__name__))
-                        plugin_obj = c()
+                        # Add plugin to list of plugins, enabled plugins and subscribe to observable
                         self.plugins.append(plugin_obj)
                         self.enabled_plugins.append(plugin_obj)
+                        self.completed_task[plugin_obj] = asyncio.ensure_future(asyncio.sleep(0.01))
+                        self.data_sink.add_observer(plugin_obj)
 
-                # Append modules from child directory
-                self.tmp_found_plugins += [c().name for (_, c) in clsmembers]
+                    # Append modules from child directory
+                    if issubclass(c, Plugin):
+                        self.tmp_found_plugins.append(plugin_obj.name)
 
         # Look recursively for additional modules in sub packages
         all_current_paths = []
@@ -147,21 +160,24 @@ class PluginHandler(object):
         return True if plugin in self.enabled_plugins else False
 
     def disable(self, plugin: Plugin) -> bool:
-        """Disable plugin by removing it from the enabled plugins list
+        """Disable plugin by removing it from the enabled plugins list and
+        unsubscribing from the observable
 
         :param plugin: Plugin to be disabled
         :type plugin: Plugin
         :return: If successfully disabled then True, otherwise False
         :rtype: bool
         """
-
         if plugin in self.enabled_plugins:
             self.enabled_plugins.remove(plugin)
+            self.data_sink.delete_observer(plugin)
+            logger.info('Disabled plugin {}'.format(plugin.name))
             return True
         return False
 
     def enable(self, plugin: Plugin) -> bool:
-        """Enable plugin by adding it to the enabled plugins list
+        """Enable plugin by adding it to the enabled plugins list and
+        subscribing to the observable
 
         :param plugin: Plugin to be enabled
         :type plugin: Plugin
@@ -171,14 +187,7 @@ class PluginHandler(object):
         
         if plugin in self.plugins:
             self.enabled_plugins.append(plugin)
+            self.data_sink.add_observer(plugin)
+            logger.info('Enabled plugin {}'.format(plugin.name))
             return True
         return False
-
-    async def execution_loop(self) -> None:
-        """Repeat the execution of all Enabled Plugins"""
-
-        while True:
-            self.update()
-            output = await self.invoke_callback('main', 'A simple string to manipulate')
-            logger.debug(output)
-            await asyncio.sleep(3)
